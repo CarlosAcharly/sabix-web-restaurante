@@ -1,0 +1,42 @@
+{
+  "name": "sabix-web-restaurant",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix --ignore-path .gitignore"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.16.0",
+      "onFail": "download"
+    }
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/eslint-config-prettier": "^10.2.0",
+    "eslint": "^10.7.0",
+    "eslint-plugin-vue": "^10.10.0",
+    "prettier": "^3.9.6",
+    "vite": "^8.1.5"
+  },
+  "dependencies": {
+    "@primevue/themes": "^4.5.4",
+    "@vueuse/core": "^14.3.0",
+    "axios": "^1.18.1",
+    "firebase": "^12.17.0",
+    "pinia": "^4.0.2",
+    "primeicons": "^8.0.0",
+    "primevue": "^5.0.0",
+    "vee-validate": "^4.15.1",
+    "vue": "^3.5.40",
+    "vue-router": "^4.6.4",
+    "yup": "^1.7.1"
+  }
+}
