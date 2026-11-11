@@ -13,6 +13,18 @@
           <i class="pi pi-refresh" :class="{ 'pi-spin': loading }"></i>
           Recargar
         </button>
+        
+        <!-- 🔥 BOTÓN DE CHAT -->
+        <button 
+          class="btn-chat" 
+          @click="openChat"
+          :disabled="chatLoading"
+        >
+          <i class="pi pi-comments"></i>
+          Abrir Chat
+          <span v-if="chatUnread > 0" class="chat-badge">{{ chatUnread }}</span>
+        </button>
+        
         <button 
           v-if="canAccept(order)" 
           class="btn-success" 
@@ -217,12 +229,14 @@ import { ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useOrdersStore } from '@/stores/orders';
 import { useAuthStore } from '@/stores/auth';
+import { useChatStore } from '@/stores/chat';
 import OrderStatusBadge from '@/components/orders/OrderStatusBadge.vue';
 
 const router = useRouter();
 const route = useRoute();
 const ordersStore = useOrdersStore();
 const authStore = useAuthStore();
+const chatStore = useChatStore();
 
 // Estado
 const showAssignModal = ref(false);
@@ -230,6 +244,10 @@ const assignLoading = ref(false);
 const availableDeliveryPeople = ref([]);
 const toastMessage = ref('');
 const toastType = ref('success');
+
+// 🔥 Estado del chat
+const chatLoading = ref(false);
+const chatUnread = ref(0);
 
 // Computed
 const order = computed(() => ordersStore.currentOrder);
@@ -334,9 +352,51 @@ async function loadOrder() {
   
   try {
     await ordersStore.fetchOrder(id);
+    // 🔥 Cargar contador de no leídos del chat
+    await loadChatUnread();
   } catch (error) {
     showToast('Error al cargar el pedido', 'error');
     router.push('/orders');
+  }
+}
+
+// 🔥 Cargar no leídos del chat
+async function loadChatUnread() {
+  if (!order.value) return;
+  
+  try {
+    const conversation = await chatStore.fetchConversationByOrder(order.value.id);
+    if (conversation) {
+      chatUnread.value = conversation.unread_count || 0;
+    }
+  } catch (error) {
+    // No mostrar error si no hay conversación aún
+    console.log('No hay conversación para este pedido aún');
+    chatUnread.value = 0;
+  }
+}
+
+// 🔥 Abrir chat del pedido
+async function openChat() {
+  if (!order.value) return;
+  
+  chatLoading.value = true;
+  
+  try {
+    // Verificar/obtener la conversación del pedido
+    const conversation = await chatStore.fetchConversationByOrder(order.value.id);
+    
+    if (conversation) {
+      // Navegar al chat con el ID de la conversación
+      router.push(`/chat?conversation_id=${conversation.id}&order_id=${order.value.id}`);
+    } else {
+      showToast('No se pudo abrir el chat del pedido', 'error');
+    }
+  } catch (error) {
+    console.error('Error al abrir chat:', error);
+    showToast(error.message || 'Error al abrir el chat', 'error');
+  } finally {
+    chatLoading.value = false;
   }
 }
 
@@ -514,6 +574,44 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
+/* 🔥 BOTÓN DE CHAT */
+.btn-chat {
+  position: relative;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, var(--color-primary-2) 0%, var(--color-primary-4) 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-chat:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(126, 9, 126, 0.3);
+}
+
+.btn-chat:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.chat-badge {
+  background: #dc2626;
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 20px;
+  min-width: 18px;
+  text-align: center;
+  margin-left: 0.25rem;
+}
+
 .header-right {
   display: flex;
   gap: 0.5rem;
@@ -586,6 +684,23 @@ onMounted(() => {
 
 .btn-purple:hover {
   background: #ddd6fe;
+}
+
+.btn-secondary {
+  padding: 0.5rem 1rem;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+
+.btn-secondary:hover {
+  background: #e5e7eb;
 }
 
 .loading-state {

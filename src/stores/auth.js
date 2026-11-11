@@ -93,6 +93,39 @@ export const useAuthStore = defineStore('auth', () => {
     return !!token.value;
   }
 
+  async function updateRestaurantProfile(profileData) {
+    const response = await api.patch('/users/profile/', profileData);
+    const responseUser = response.data?.user || response.data?.profile || response.data;
+    const updatedUser = { ...user.value, ...responseUser, ...profileData };
+
+    user.value = updatedUser;
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+
+    restaurant.value = {
+      ...restaurant.value,
+      id: updatedUser.id,
+      name: updatedUser.restaurant_name || restaurant.value?.name,
+      description: updatedUser.restaurant_description ?? restaurant.value?.description ?? '',
+      address: updatedUser.restaurant_address || restaurant.value?.address,
+      phone: updatedUser.restaurant_phone || updatedUser.phone || restaurant.value?.phone,
+      is_verified: updatedUser.is_restaurant_verified ?? restaurant.value?.is_verified,
+      profile_image: updatedUser.profile_image || restaurant.value?.profile_image,
+    };
+    localStorage.setItem('restaurant', JSON.stringify(restaurant.value));
+
+    return updatedUser;
+  }
+
+  async function changePassword(passwordData) {
+    const response = await api.post('/users/change-password/', {
+      old_password: passwordData.currentPassword,
+      new_password: passwordData.newPassword,
+      confirm_password: passwordData.confirmPassword,
+    });
+
+    return response.data;
+  }
+
   return {
     token,
     refreshToken,
@@ -103,5 +136,7 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     logout,
     checkAuth,
+    updateRestaurantProfile,
+    changePassword,
   };
 });

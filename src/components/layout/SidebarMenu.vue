@@ -71,6 +71,13 @@
         </div>
       </div>
       
+      <!-- Chat -->
+      <router-link to="/chat" class="menu-item" active-class="active">
+        <i class="pi pi-comments menu-icon"></i>
+        <span class="menu-label">Chat</span>
+        <span v-if="unreadMessages > 0" class="badge">{{ unreadMessages }}</span>
+      </router-link>
+      
       <router-link to="/notifications" class="menu-item" active-class="active">
         <i class="pi pi-bell menu-icon"></i>
         <span class="menu-label">Notificaciones</span>
@@ -99,20 +106,25 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationsStore } from '@/stores/notifications';
+import { useChatStore } from '@/stores/chat';
 
 const route = useRoute();
 const authStore = useAuthStore();
 const notificationsStore = useNotificationsStore();
+const chatStore = useChatStore();
 
 const pendingOrders = ref(0);
 const showSubmenu = ref(false);
 
+// Contadores
 const unreadCount = computed(() => notificationsStore.unreadCount);
+const unreadMessages = computed(() => chatStore.totalUnread);
 
+// Detectar si el menú está activo
 const isMenuActive = computed(() => {
   const menuRoutes = ['/menu', '/menu/categories', '/menu/create', '/menu/categories/create'];
   return menuRoutes.some(path => route.path === path || route.path.startsWith('/menu/'));
@@ -122,6 +134,7 @@ if (isMenuActive.value) {
   showSubmenu.value = true;
 }
 
+// Observar cambios de ruta para mantener el submenú abierto
 watch(() => route.path, (newPath) => {
   const menuRoutes = ['/menu', '/menu/categories', '/menu/create', '/menu/categories/create'];
   const isMenuRoute = menuRoutes.some(path => newPath === path || newPath.startsWith('/menu/'));
@@ -134,6 +147,12 @@ watch(() => route.path, (newPath) => {
 function toggleSubmenu() {
   showSubmenu.value = !showSubmenu.value;
 }
+
+// Cargar contadores al montar
+onMounted(() => {
+  notificationsStore.fetchUnreadCount();
+  chatStore.fetchTotalUnread();
+});
 </script>
 
 <style scoped>

@@ -24,6 +24,12 @@ const routes = [
         name: 'Dashboard',
         component: () => import('@/views/Dashboard.vue'),
       },
+      // Agregar dentro de los children de '/'
+      {
+        path: 'chat',
+        name: 'Chat',
+        component: () => import('@/views/chat/ChatView.vue'),
+      },
       // Pedidos
       {
         path: 'orders',

@@ -6,6 +6,7 @@ import PrimeVue from 'primevue/config';
 import Aura from '@primevue/themes/aura';
 import ToastService from 'primevue/toastservice';
 import 'primeicons/primeicons.css';
+import { registerSW } from 'virtual:pwa-register';
 
 // Estilos globales
 import './assets/styles/main.css';
@@ -41,3 +42,21 @@ if ('serviceWorker' in navigator) {
       console.error('❌ Error al registrar Service Worker:', error);
     });
 }
+
+const updateSW = registerSW({
+  onNeedRefresh() {
+    console.log('🔄 Nueva versión disponible');
+    if (confirm('Hay una nueva versión disponible. ¿Actualizar ahora?')) {
+      updateSW(true);
+    }
+  },
+  onOfflineReady() {
+    console.log('✅ App lista para funcionar offline');
+  },
+  onRegistered(registration) {
+    console.log('✅ PWA Service Worker registrado:', registration);
+  },
+  onRegisterError(error) {
+    console.error('❌ Error al registrar PWA Service Worker:', error);
+  },
+});

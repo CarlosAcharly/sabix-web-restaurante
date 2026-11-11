@@ -41,6 +41,21 @@
             <small class="error-text" v-if="errors.description">{{ errors.description }}</small>
           </div>
 
+          <!-- Imagen del producto -->
+          <div v-if="!isEditing" class="form-group full-width">
+            <label for="image">Imagen del producto</label>
+            <input
+              id="image"
+              type="file"
+              accept="image/*"
+              class="form-input"
+              :class="{ 'is-invalid': errors.image }"
+              @change="handleImageChange"
+            />
+            <small class="error-text" v-if="errors.image">{{ errors.image }}</small>
+            <small v-else-if="imageFile" class="subtitle">{{ imageFile.name }}</small>
+          </div>
+
           <!-- Precio y Descuento -->
           <div class="form-group">
             <label for="price">Precio *</label>
@@ -182,6 +197,7 @@ const loading = ref(false);
 const error = ref('');
 const errors = reactive({});
 const categories = ref([]);
+const imageFile = ref(null);
 
 const form = reactive({
   name: '',
@@ -197,6 +213,11 @@ const form = reactive({
   is_vegan: false,
   is_gluten_free: false,
 });
+
+function handleImageChange(event) {
+  imageFile.value = event.target.files?.[0] || null;
+  delete errors.image;
+}
 
 const isEditing = computed(() => !!route.params.id);
 
@@ -269,6 +290,11 @@ function validateForm() {
 
 // Enviar formulario
 async function submitForm() {
+  if (imageFile.value && !imageFile.value.type.startsWith('image/')) {
+    errors.image = 'Selecciona un archivo de imagen válido';
+    return;
+  }
+
   if (!validateForm()) return;
 
   loading.value = true;
@@ -295,7 +321,7 @@ async function submitForm() {
       result = await productsStore.updateProduct(route.params.id, data);
       console.log('Producto actualizado:', result);
     } else {
-      result = await productsStore.createProduct(data);
+      result = await productsStore.createProduct(data, imageFile.value);
       console.log('Producto creado:', result);
     }
 

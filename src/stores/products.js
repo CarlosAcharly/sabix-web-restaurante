@@ -96,12 +96,27 @@ export const useProductsStore = defineStore('products', () => {
     }
   }
 
-  async function createProduct(productData) {
+  async function createProduct(productData, imageFile = null) {
     loading.value = true;
     error.value = null;
     
     try {
-      const response = await api.post('/products/products/', productData);
+      let payload = productData;
+      let config;
+
+      if (imageFile) {
+        const formData = new FormData();
+        Object.entries(productData).forEach(([key, value]) => {
+          if (value !== null && value !== undefined) {
+            formData.append(key, value);
+          }
+        });
+        formData.append('image', imageFile);
+        payload = formData;
+        config = { headers: { 'Content-Type': false } };
+      }
+
+      const response = await api.post('/products/products/', payload, config);
       products.value.unshift(response.data);
       return response.data;
     } catch (err) {

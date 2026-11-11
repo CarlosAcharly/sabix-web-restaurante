@@ -1,12 +1,16 @@
 <template>
   <div id="app">
     <router-view />
+    <InstallPWA />
+    <OfflineIndicator />
   </div>
 </template>
 
 <script setup>
 import { onMounted } from 'vue';
 import { useAuthStore } from './stores/auth';
+import InstallPWA from './components/pwa/InstallPWA.vue';
+import OfflineIndicator from './components/pwa/OfflineIndicator.vue';
 
 const authStore = useAuthStore();
 
