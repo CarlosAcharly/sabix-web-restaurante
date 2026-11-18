@@ -46,6 +46,7 @@
           <option value="confirmed">Confirmados</option>
           <option value="preparing">En preparación</option>
           <option value="ready">Listos</option>
+          <option value="assigned">Esperando respuesta del repartidor</option>
           <option value="in_delivery">En camino</option>
           <option value="delivered">Entregados</option>
           <option value="cancelled">Cancelados</option>
@@ -100,6 +101,14 @@
             <i class="pi pi-shopping-bag"></i>
             <span>{{ order.total_items || 0 }} productos</span>
           </div>
+          <div class="order-finance">
+            <span class="payment-status" :class="{ 'is-paid': order.is_paid }">
+              {{ order.is_paid ? 'Pagado' : 'Pago pendiente' }}
+            </span>
+            <span v-if="order.is_paid && order.restaurant_earnings !== null && order.restaurant_earnings !== undefined" class="restaurant-earning">
+              Tu ganancia: {{ formatCurrency(order.restaurant_earnings) }}
+            </span>
+          </div>
           <div class="order-actions" @click.stop>
             <button
               v-if="canAccept(order)"
@@ -134,12 +143,22 @@
               <i class="pi pi-check-circle"></i> Listo
             </button>
             <button
-              v-if="canAssignDelivery(order)"
+              v-if="canRetryAutoAssign(order)"
               class="action-btn btn-purple"
-              @click="openAssignModal(order)"
-              title="Asignar repartidor"
+              :disabled="retryingOrderId === order.id"
+              @click="retryAutoAssign(order.id)"
+              title="Reintentar despacho automático"
             >
-              <i class="pi pi-truck"></i> Asignar
+              <i :class="retryingOrderId === order.id ? 'pi pi-spin pi-spinner' : 'pi pi-truck'"></i>
+              {{ retryingOrderId === order.id ? 'Buscando...' : 'Reintentar despacho' }}
+            </button>
+            <button
+              v-if="canRetryAutoAssign(order)"
+              class="action-btn btn-secondary"
+              @click.stop="openManualAssign(order)"
+              title="Buscar y asignar un repartidor manualmente"
+            >
+              <i class="pi pi-search"></i> Buscar manualmente
             </button>
             <button
               class="action-btn btn-secondary"
@@ -181,104 +200,72 @@
       </button>
     </div>
 
-    <!-- Modal de asignación de repartidor -->
-    <div v-if="showAssignModal" class="modal-overlay" @click="closeAssignModal">
+    <div v-if="showManualAssignModal" class="modal-overlay" @click="closeManualAssign">
       <div class="modal-content" @click.stop>
         <div class="modal-header">
-          <h3>Asignar Repartidor</h3>
-          <button class="modal-close" @click="closeAssignModal">×</button>
+          <h3>Asignar repartidor al pedido #{{ selectedOrder?.id }}</h3>
+          <button class="modal-close" @click="closeManualAssign">×</button>
         </div>
         <div class="modal-body">
-          <!-- Pestañas de selección -->
           <div class="assign-tabs">
-            <button 
-              class="tab-btn" 
-              :class="{ active: assignTab === 'nearby' }"
-              @click="assignTab = 'nearby'; searchDeliveryPeople()"
+            <button
+              class="tab-btn"
+              :class="{ active: manualAssignTab === 'nearby' }"
+              :disabled="manualAssignLoading"
+              @click="changeManualAssignTab('nearby')"
             >
               <i class="pi pi-map-marker"></i> Cercanos
             </button>
-            <button 
-              class="tab-btn" 
-              :class="{ active: assignTab === 'all' }"
-              @click="assignTab = 'all'; loadAllDeliveryPeople()"
+            <button
+              class="tab-btn"
+              :class="{ active: manualAssignTab === 'all' }"
+              :disabled="manualAssignLoading"
+              @click="changeManualAssignTab('all')"
             >
-              <i class="pi pi-users"></i> Todos los repartidores
+              <i class="pi pi-users"></i> Todos disponibles
             </button>
           </div>
 
-          <p v-if="assignTab === 'nearby'" class="assign-info">
-            <i class="pi pi-info-circle"></i> Mostrando repartidores disponibles cercanos al restaurante
+          <p class="assign-info">
+            <i class="pi pi-info-circle"></i>
+            {{ manualAssignTab === 'nearby'
+              ? 'Selecciona un repartidor cercano al restaurante.'
+              : 'Selecciona cualquier repartidor disponible.' }}
           </p>
-          <p v-else class="assign-info">
-            <i class="pi pi-info-circle"></i> Mostrando todos los repartidores disponibles (sin restricción de ubicación)
-          </p>
-          
-          <!-- Cargando -->
-          <div v-if="assignLoading" class="loading-state">
+
+          <div v-if="manualAssignLoading" class="loading-state">
             <i class="pi pi-spin pi-spinner"></i>
             <span>Buscando repartidores...</span>
           </div>
-          
-          <!-- Sin resultados - Cercanos -->
-          <div v-else-if="availableDeliveryPeople.length === 0 && assignTab === 'nearby'" class="empty-state">
+          <div v-else-if="manualDeliveryPeople.length === 0" class="empty-state">
             <i class="pi pi-exclamation-circle"></i>
-            <p>No hay repartidores disponibles cercanos</p>
-            <div class="empty-actions">
-              <button class="btn-secondary" @click="searchDeliveryPeople">Intentar de nuevo</button>
-              <button class="btn-primary" @click="assignTab = 'all'; loadAllDeliveryPeople()">
-                Ver todos los repartidores
-              </button>
-            </div>
+            <p>{{ manualAssignTab === 'nearby'
+              ? 'No hay repartidores cercanos disponibles.'
+              : 'No hay repartidores disponibles en este momento.' }}</p>
+            <button class="btn-secondary" @click="loadManualDeliveryPeople">Buscar de nuevo</button>
           </div>
-
-          <!-- Sin resultados - Todos -->
-          <div v-else-if="availableDeliveryPeople.length === 0 && assignTab === 'all'" class="empty-state">
-            <i class="pi pi-exclamation-circle"></i>
-            <p>No hay repartidores disponibles en este momento</p>
-            <button class="btn-secondary" @click="loadAllDeliveryPeople">Intentar de nuevo</button>
-          </div>
-          
-          <!-- Lista de repartidores -->
           <div v-else class="delivery-list">
-            <div
-              v-for="delivery in availableDeliveryPeople"
-              :key="delivery.id"
-              class="delivery-item"
-            >
+            <div v-for="delivery in manualDeliveryPeople" :key="delivery.id" class="delivery-item">
               <div class="delivery-info">
-                <div class="delivery-avatar">
-                  <i class="pi pi-user"></i>
-                </div>
+                <div class="delivery-avatar"><i class="pi pi-user"></i></div>
                 <div class="delivery-details">
                   <span class="delivery-name">{{ delivery.full_name || delivery.username }}</span>
                   <div class="delivery-meta">
                     <span v-if="delivery.phone" class="delivery-phone">
                       <i class="pi pi-phone"></i> {{ delivery.phone }}
                     </span>
-                    <span v-if="delivery.distance_km !== undefined" class="delivery-distance">
-                      📍 {{ delivery.distance_km }} km
-                    </span>
-                    <span v-if="delivery.estimated_time !== undefined" class="delivery-time">
-                      ⏱️ {{ delivery.estimated_time }} min
-                    </span>
-                    <span v-if="delivery.rating" class="delivery-rating">
-                      ⭐ {{ delivery.rating }}
-                    </span>
-                    <span v-if="delivery.completed_deliveries" class="delivery-completed">
-                      ✅ {{ delivery.completed_deliveries }} entregas
+                    <span v-if="delivery.distance_km !== null && delivery.distance_km !== undefined" class="delivery-distance">
+                      {{ delivery.distance_km }} km
                     </span>
                   </div>
                 </div>
-                <div class="delivery-status">
-                  <span class="status-badge available">Disponible</span>
-                </div>
               </div>
-              <button 
-                class="btn-primary btn-sm" 
-                @click="assignDeliveryPerson(delivery.id)"
+              <button
+                class="btn-primary btn-sm"
+                :disabled="manualAssigning"
+                @click="assignManualDelivery(delivery.id)"
               >
-                Asignar
+                {{ manualAssigning ? 'Enviando...' : 'Asignar' }}
               </button>
             </div>
           </div>
@@ -299,23 +286,23 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useOrdersStore } from '@/stores/orders';
-import { useAuthStore } from '@/stores/auth';
 import OrderStatusBadge from '@/components/orders/OrderStatusBadge.vue';
 
 const router = useRouter();
 const ordersStore = useOrdersStore();
-const authStore = useAuthStore();
 
 // Estado local
 const searchQuery = ref('');
 const sortBy = ref('-created_at');
-const showAssignModal = ref(false);
+const retryingOrderId = ref(null);
+const showManualAssignModal = ref(false);
 const selectedOrder = ref(null);
-const assignLoading = ref(false);
-const availableDeliveryPeople = ref([]);
+const manualAssignTab = ref('nearby');
+const manualAssignLoading = ref(false);
+const manualAssigning = ref(false);
+const manualDeliveryPeople = ref([]);
 const toastMessage = ref('');
 const toastType = ref('success');
-const assignTab = ref('nearby'); // 'nearby' | 'all'
 
 // Computed
 const orders = computed(() => ordersStore.orders);
@@ -336,6 +323,7 @@ const statusStats = computed(() => [
   { status: 'confirmed', label: 'Confirmados', count: stats.value.confirmed_count },
   { status: 'preparing', label: 'Preparando', count: stats.value.preparing_count },
   { status: 'ready', label: 'Listos', count: stats.value.ready_count },
+  { status: 'assigned', label: 'Esperando respuesta', count: stats.value.assigned_count },
   { status: 'in_delivery', label: 'En camino', count: stats.value.in_delivery_count },
   { status: 'delivered', label: 'Entregados', count: stats.value.delivered_count },
 ]);
@@ -357,7 +345,7 @@ function canReady(order) {
   return order.status === 'preparing';
 }
 
-function canAssignDelivery(order) {
+function canRetryAutoAssign(order) {
   return order.status === 'ready' && !order.delivery_person;
 }
 
@@ -366,7 +354,8 @@ function canTransitionTo(order, newStatus) {
     'pending': ['confirmed', 'cancelled', 'rejected'],
     'confirmed': ['preparing', 'cancelled'],
     'preparing': ['ready'],
-    'ready': ['in_delivery'],
+    'ready': ['assigned'],
+    'assigned': ['in_delivery'],
     'in_delivery': ['delivered'],
   };
   
@@ -439,18 +428,17 @@ async function updateStatus(orderId, status) {
     
     console.log(`🔄 Intentando cambiar de '${order.status}' a '${status}'`);
     
-    await ordersStore.updateOrderStatus(orderId, status);
-    showToast('Estado actualizado correctamente', 'success');
+    const result = await ordersStore.updateOrderStatus(orderId, status);
+    showToast(
+      status === 'ready'
+        ? result.assignment_message || 'Pedido listo; se inició el despacho automático.'
+        : 'Estado actualizado correctamente',
+      status === 'ready' && !result.assignment ? 'info' : 'success'
+    );
     await loadOrders();
   } catch (error) {
     console.error('❌ Error en updateStatus:', error);
-    
-    if (error.message?.includes('500') || error.status === 500) {
-      showToast('Estado actualizado (recarga la página para ver el cambio)', 'info');
-      await loadOrders();
-    } else {
-      showToast(error.message || 'Error al actualizar estado', 'error');
-    }
+    showToast(error.message || 'Error al actualizar estado', 'error');
   }
 }
 
@@ -469,89 +457,81 @@ function formatTime(date) {
   });
 }
 
-// ============================================
-// ASIGNACIÓN DE REPARTIDORES
-// ============================================
-
-async function openAssignModal(order) {
-  selectedOrder.value = order;
-  assignTab.value = 'nearby';
-  showAssignModal.value = true;
-  await searchDeliveryPeople();
+function formatCurrency(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '—';
+  return new Intl.NumberFormat('es-MX', {
+    style: 'currency',
+    currency: 'MXN',
+    maximumFractionDigits: 2,
+  }).format(amount);
 }
 
-function closeAssignModal() {
-  showAssignModal.value = false;
-  selectedOrder.value = null;
-  availableDeliveryPeople.value = [];
-  assignTab.value = 'nearby';
-}
+async function retryAutoAssign(orderId) {
+  if (retryingOrderId.value !== null) return;
 
-// Repartidores cercanos
-async function searchDeliveryPeople() {
-  if (!selectedOrder.value) return;
-  
-  assignLoading.value = true;
+  retryingOrderId.value = orderId;
   try {
-    const restaurant = authStore.restaurant;
-    const restaurantLat = restaurant?.current_location_lat || 19.4300;
-    const restaurantLng = restaurant?.current_location_lng || -99.1300;
-    
-    const result = await ordersStore.findNearestDeliveryPeople(
-      selectedOrder.value.id,
-      restaurantLat,
-      restaurantLng,
-      5,
-      10
-    );
-    
-    availableDeliveryPeople.value = result.available_delivery_people || [];
+    const result = await ordersStore.autoAssignDelivery(orderId);
+    showToast(result.message || 'Solicitud enviada; esperando aceptación del repartidor.', 'success');
+    await loadOrders();
+  } catch (error) {
+    showToast(error.message || 'No se pudo reintentar el despacho automático', 'error');
+  } finally {
+    retryingOrderId.value = null;
+  }
+}
+
+async function openManualAssign(order) {
+  selectedOrder.value = order;
+  manualAssignTab.value = 'nearby';
+  showManualAssignModal.value = true;
+  await loadManualDeliveryPeople();
+}
+
+function closeManualAssign() {
+  showManualAssignModal.value = false;
+  selectedOrder.value = null;
+  manualDeliveryPeople.value = [];
+}
+
+async function changeManualAssignTab(tab) {
+  manualAssignTab.value = tab;
+  await loadManualDeliveryPeople();
+}
+
+async function loadManualDeliveryPeople() {
+  if (!selectedOrder.value) return;
+
+  manualAssignLoading.value = true;
+  manualDeliveryPeople.value = [];
+  try {
+    if (manualAssignTab.value === 'nearby') {
+      const result = await ordersStore.findNearestDeliveryPeople(selectedOrder.value.id, 5, 10);
+      manualDeliveryPeople.value = result.available_delivery_people || [];
+    } else {
+      manualDeliveryPeople.value = await ordersStore.fetchAllAvailableDeliveryPeople();
+    }
   } catch (error) {
     showToast(error.message || 'Error al buscar repartidores', 'error');
   } finally {
-    assignLoading.value = false;
+    manualAssignLoading.value = false;
   }
 }
 
-// ✅ TODOS los repartidores disponibles (usa el nuevo endpoint)
-async function loadAllDeliveryPeople() {
-  if (!selectedOrder.value) return;
-  
-  assignLoading.value = true;
-  try {
-    // Usar el nuevo endpoint específico
-    const result = await ordersStore.fetchAllAvailableDeliveryPeople();
-    availableDeliveryPeople.value = result || [];
-    
-    if (availableDeliveryPeople.value.length === 0) {
-      showToast('No hay repartidores disponibles en este momento', 'info');
-    }
-  } catch (error) {
-    showToast(error.message || 'Error al cargar repartidores', 'error');
-  } finally {
-    assignLoading.value = false;
-  }
-}
+async function assignManualDelivery(deliveryPersonId) {
+  if (!selectedOrder.value || manualAssigning.value) return;
 
-async function assignDeliveryPerson(deliveryPersonId) {
-  if (!selectedOrder.value) return;
-  
+  manualAssigning.value = true;
   try {
-    await ordersStore.assignDelivery(selectedOrder.value.id, deliveryPersonId);
-    showToast('Repartidor asignado correctamente', 'success');
-    closeAssignModal();
+    const result = await ordersStore.assignDelivery(selectedOrder.value.id, deliveryPersonId);
+    showToast(result.message || 'Solicitud enviada; esperando aceptación del repartidor.', 'success');
+    closeManualAssign();
     await loadOrders();
   } catch (error) {
-    console.error('❌ Error en assignDeliveryPerson:', error);
-    
-    // Verificar si el error es 500 y mostrar un mensaje diferente
-    if (error.message?.includes('500') || error.status === 500) {
-      showToast('Repartidor asignado (recarga para ver el cambio)', 'info');
-      closeAssignModal();
-      await loadOrders();
-    } else {
-      showToast(error.message || 'Error al asignar repartidor', 'error');
-    }
+    showToast(error.message || 'Error al asignar repartidor', 'error');
+  } finally {
+    manualAssigning.value = false;
   }
 }
 
@@ -809,8 +789,30 @@ watch(() => filters.value.status, () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.75rem;
   padding-top: 0.75rem;
   border-top: 1px solid #f3f4f6;
+}
+
+.order-finance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.payment-status {
+  color: #92400e;
+}
+
+.payment-status.is-paid {
+  color: #15803d;
+}
+
+.restaurant-earning {
+  color: #374151;
+  font-weight: 600;
 }
 
 .order-items {

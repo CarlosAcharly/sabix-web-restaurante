@@ -36,6 +36,11 @@ const statusConfig = {
     class: 'status-ready',
     dot: 'dot-success',
   },
+  assigned: {
+    label: 'Esperando respuesta del repartidor',
+    class: 'status-assigned',
+    dot: 'dot-warning',
+  },
   in_delivery: {
     label: 'En camino',
     class: 'status-delivery',
@@ -113,6 +118,10 @@ const displayText = computed(() => statusInfo.value.label);
 .status-ready {
   background: #dcfce7;
   color: #166534;
+}
+.status-assigned {
+  background: #fef3c7;
+  color: #92400e;
 }
 .status-delivery {
   background: #ede9fe;

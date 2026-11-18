@@ -54,11 +54,20 @@
           <i class="pi pi-check-circle"></i> Marcar como Listo
         </button>
         <button 
-          v-if="canAssignDelivery(order)" 
+          v-if="canRetryAutoAssign(order)"
           class="btn-purple" 
-          @click="openAssignModal"
+          :disabled="retryingAutoAssign"
+          @click="retryAutoAssign"
         >
-          <i class="pi pi-truck"></i> Asignar Repartidor
+          <i :class="retryingAutoAssign ? 'pi pi-spin pi-spinner' : 'pi pi-truck'"></i>
+          {{ retryingAutoAssign ? 'Buscando...' : 'Reintentar despacho' }}
+        </button>
+        <button
+          v-if="canRetryAutoAssign(order)"
+          class="btn-secondary"
+          @click="openManualAssign"
+        >
+          <i class="pi pi-search"></i> Buscar manualmente
         </button>
       </div>
     </div>
@@ -156,6 +165,13 @@
               <span>Total</span>
               <span>${{ parseFloat(order.total).toFixed(2) }}</span>
             </div>
+            <div class="total-row restaurant-earning">
+              <span>Ganancia del restaurante</span>
+              <strong v-if="order.is_paid && order.restaurant_earnings !== null && order.restaurant_earnings !== undefined">
+                {{ formatCurrency(order.restaurant_earnings) }}
+              </strong>
+              <span v-else>{{ order.is_paid ? 'No disponible' : 'Pendiente de pago' }}</span>
+            </div>
           </div>
         </div>
 
@@ -175,40 +191,68 @@
       </div>
     </div>
 
-    <!-- Modal de asignación de repartidor -->
-    <div v-if="showAssignModal" class="modal-overlay" @click="closeAssignModal">
+    <div v-if="showManualAssignModal" class="modal-overlay" @click="closeManualAssign">
       <div class="modal-content" @click.stop>
         <div class="modal-header">
-          <h3>Asignar Repartidor</h3>
-          <button class="modal-close" @click="closeAssignModal">×</button>
+          <h3>Asignar repartidor al pedido #{{ order?.id }}</h3>
+          <button class="modal-close" @click="closeManualAssign">×</button>
         </div>
         <div class="modal-body">
-          <p>Buscando repartidores disponibles para el pedido #{{ order?.id }}...</p>
-          
-          <div v-if="assignLoading" class="loading-state">
-            <i class="pi pi-spin pi-spinner"></i>
-            <span>Buscando repartidores cercanos...</span>
-          </div>
-          
-          <div v-else-if="availableDeliveryPeople.length === 0" class="empty-state">
-            <i class="pi pi-exclamation-circle"></i>
-            <p>No hay repartidores disponibles cercanos</p>
-            <button class="btn-secondary" @click="searchDeliveryPeople">Intentar de nuevo</button>
-          </div>
-          
-          <div v-else class="delivery-list">
-            <div
-              v-for="delivery in availableDeliveryPeople"
-              :key="delivery.id"
-              class="delivery-item"
-              @click="assignDeliveryPerson(delivery.id)"
+          <div class="assign-tabs">
+            <button
+              class="tab-btn"
+              :class="{ active: manualAssignTab === 'nearby' }"
+              :disabled="manualAssignLoading"
+              @click="changeManualAssignTab('nearby')"
             >
+              <i class="pi pi-map-marker"></i> Cercanos
+            </button>
+            <button
+              class="tab-btn"
+              :class="{ active: manualAssignTab === 'all' }"
+              :disabled="manualAssignLoading"
+              @click="changeManualAssignTab('all')"
+            >
+              <i class="pi pi-users"></i> Todos disponibles
+            </button>
+          </div>
+
+          <p class="assign-info">
+            <i class="pi pi-info-circle"></i>
+            {{ manualAssignTab === 'nearby'
+              ? 'Selecciona un repartidor cercano al restaurante.'
+              : 'Selecciona cualquier repartidor disponible.' }}
+          </p>
+
+          <div v-if="manualAssignLoading" class="loading-state">
+            <i class="pi pi-spin pi-spinner"></i>
+            <span>Buscando repartidores...</span>
+          </div>
+          <div v-else-if="manualDeliveryPeople.length === 0" class="empty-state">
+            <i class="pi pi-exclamation-circle"></i>
+            <p>{{ manualAssignTab === 'nearby'
+              ? 'No hay repartidores cercanos disponibles.'
+              : 'No hay repartidores disponibles en este momento.' }}</p>
+            <button class="btn-secondary" @click="loadManualDeliveryPeople">Buscar de nuevo</button>
+          </div>
+          <div v-else class="delivery-list">
+            <div v-for="delivery in manualDeliveryPeople" :key="delivery.id" class="delivery-item">
               <div class="delivery-info">
                 <span class="delivery-name">{{ delivery.full_name || delivery.username }}</span>
-                <span class="delivery-distance">📍 {{ delivery.distance_km }} km</span>
-                <span class="delivery-time">⏱️ {{ delivery.estimated_time }} min</span>
+                <span v-if="delivery.distance_km !== null && delivery.distance_km !== undefined" class="delivery-distance">
+                  {{ delivery.distance_km }} km
+                </span>
+                <span v-if="delivery.estimated_time !== null && delivery.estimated_time !== undefined" class="delivery-time">
+                  {{ delivery.estimated_time }} min
+                </span>
               </div>
-              <button class="btn-primary btn-sm">Asignar</button>
+              <button
+                class="btn-primary btn-sm"
+                :disabled="manualAssigning"
+                @click="assignManualDelivery(delivery.id)"
+              >
+                {{ manualAssigning ? 'Enviando...' : 'Asignar' }}
+              </button>
             </div>
           </div>
         </div>
@@ -228,20 +272,21 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useOrdersStore } from '@/stores/orders';
-import { useAuthStore } from '@/stores/auth';
 import { useChatStore } from '@/stores/chat';
 import OrderStatusBadge from '@/components/orders/OrderStatusBadge.vue';
 
 const router = useRouter();
 const route = useRoute();
 const ordersStore = useOrdersStore();
-const authStore = useAuthStore();
 const chatStore = useChatStore();
 
 // Estado
-const showAssignModal = ref(false);
-const assignLoading = ref(false);
-const availableDeliveryPeople = ref([]);
+const retryingAutoAssign = ref(false);
+const showManualAssignModal = ref(false);
+const manualAssignTab = ref('nearby');
+const manualAssignLoading = ref(false);
+const manualAssigning = ref(false);
+const manualDeliveryPeople = ref([]);
 const toastMessage = ref('');
 const toastType = ref('success');
 
@@ -329,7 +374,7 @@ function canReady(order) {
   return order?.status === 'preparing';
 }
 
-function canAssignDelivery(order) {
+function canRetryAutoAssign(order) {
   return order?.status === 'ready' && !order?.delivery_person;
 }
 
@@ -340,6 +385,16 @@ function getPaymentMethod(method) {
     online: 'Pago en línea',
   };
   return methods[method] || method;
+}
+
+function formatCurrency(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '—';
+  return new Intl.NumberFormat('es-MX', {
+    style: 'currency',
+    currency: 'MXN',
+    maximumFractionDigits: 2,
+  }).format(amount);
 }
 
 // Cargar pedido
@@ -411,19 +466,17 @@ async function updateStatus(status) {
   if (!order.value) return;
   
   try {
-    await ordersStore.updateOrderStatus(order.value.id, status);
-    showToast('Estado actualizado correctamente', 'success');
+    const result = await ordersStore.updateOrderStatus(order.value.id, status);
+    showToast(
+      status === 'ready'
+        ? result.assignment_message || 'Pedido listo; se inició el despacho automático.'
+        : 'Estado actualizado correctamente',
+      status === 'ready' && !result.assignment ? 'info' : 'success'
+    );
     await loadOrder();
   } catch (error) {
     console.error('❌ Error en updateStatus:', error);
-    
-    // Verificar si el error es 500 y mostrar un mensaje diferente
-    if (error.message?.includes('500') || error.status === 500) {
-      showToast('Estado actualizado (recarga el pedido para ver el cambio)', 'info');
-      await loadOrder();
-    } else {
-      showToast(error.message || 'Error al actualizar estado', 'error');
-    }
+    showToast(error.message || 'Error al actualizar estado', 'error');
   }
 }
 
@@ -434,52 +487,71 @@ async function rejectOrder() {
   }
 }
 
-// Asignación de repartidores
-function openAssignModal() {
-  showAssignModal.value = true;
-  searchDeliveryPeople();
-}
+async function retryAutoAssign() {
+  if (!order.value || retryingAutoAssign.value) return;
 
-function closeAssignModal() {
-  showAssignModal.value = false;
-  availableDeliveryPeople.value = [];
-}
-
-async function searchDeliveryPeople() {
-  if (!order.value) return;
-  
-  assignLoading.value = true;
+  retryingAutoAssign.value = true;
   try {
-    const restaurant = authStore.restaurant;
-    const restaurantLat = restaurant?.current_location_lat || 19.4300;
-    const restaurantLng = restaurant?.current_location_lng || -99.1300;
-    
-    const result = await ordersStore.findNearestDeliveryPeople(
-      order.value.id,
-      restaurantLat,
-      restaurantLng,
-      5,
-      10
-    );
-    
-    availableDeliveryPeople.value = result.available_delivery_people || [];
+    const result = await ordersStore.autoAssignDelivery(order.value.id);
+    showToast(result.message || 'Solicitud enviada; esperando aceptación del repartidor.', 'success');
+    await loadOrder();
   } catch (error) {
-    showToast(error.message || 'Error al buscar repartidores', 'error');
+    showToast(error.message || 'No se pudo reintentar el despacho automático', 'error');
   } finally {
-    assignLoading.value = false;
+    retryingAutoAssign.value = false;
   }
 }
 
-async function assignDeliveryPerson(deliveryPersonId) {
+async function openManualAssign() {
   if (!order.value) return;
-  
+
+  manualAssignTab.value = 'nearby';
+  showManualAssignModal.value = true;
+  await loadManualDeliveryPeople();
+}
+
+function closeManualAssign() {
+  showManualAssignModal.value = false;
+  manualDeliveryPeople.value = [];
+}
+
+async function changeManualAssignTab(tab) {
+  manualAssignTab.value = tab;
+  await loadManualDeliveryPeople();
+}
+
+async function loadManualDeliveryPeople() {
+  if (!order.value) return;
+
+  manualAssignLoading.value = true;
+  manualDeliveryPeople.value = [];
   try {
-    await ordersStore.assignDelivery(order.value.id, deliveryPersonId);
-    showToast('Repartidor asignado correctamente', 'success');
-    closeAssignModal();
+    if (manualAssignTab.value === 'nearby') {
+      const result = await ordersStore.findNearestDeliveryPeople(order.value.id, 5, 10);
+      manualDeliveryPeople.value = result.available_delivery_people || [];
+    } else {
+      manualDeliveryPeople.value = await ordersStore.fetchAllAvailableDeliveryPeople();
+    }
+  } catch (error) {
+    showToast(error.message || 'Error al buscar repartidores', 'error');
+  } finally {
+    manualAssignLoading.value = false;
+  }
+}
+
+async function assignManualDelivery(deliveryPersonId) {
+  if (!order.value || manualAssigning.value) return;
+
+  manualAssigning.value = true;
+  try {
+    const result = await ordersStore.assignDelivery(order.value.id, deliveryPersonId);
+    showToast(result.message || 'Solicitud enviada; esperando aceptación del repartidor.', 'success');
+    closeManualAssign();
     await loadOrder();
   } catch (error) {
     showToast(error.message || 'Error al asignar repartidor', 'error');
+  } finally {
+    manualAssigning.value = false;
   }
 }
 
@@ -860,6 +932,17 @@ onMounted(() => {
   margin-top: 0.25rem;
 }
 
+.restaurant-earning {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e5e7eb;
+  color: #15803d;
+}
+
+.restaurant-earning strong {
+  font-size: 1.05rem;
+}
+
 /* Timeline */
 .timeline {
   position: relative;
@@ -988,6 +1071,38 @@ onMounted(() => {
   padding: 1.5rem;
   max-height: 60vh;
   overflow-y: auto;
+}
+
+.assign-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.assign-tabs .tab-btn {
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.assign-tabs .tab-btn.active {
+  background: rgba(126, 9, 126, 0.08);
+  color: var(--color-primary-2);
+  font-weight: 600;
+}
+
+.assign-tabs .tab-btn:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.assign-info {
+  margin-bottom: 1rem;
+  color: #6b7280;
+  font-size: 0.85rem;
 }
 
 .delivery-list {

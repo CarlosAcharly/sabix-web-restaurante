@@ -64,6 +64,68 @@
       </div>
     </div>
 
+    <section class="income-report" aria-labelledby="income-report-title">
+      <div class="income-report-header">
+        <div>
+          <h2 id="income-report-title">Ganancias por pedidos pagados y entregados</h2>
+          <p>Se muestra la ganancia del restaurante según la fecha de entrega.</p>
+        </div>
+        <label class="period-filter">
+          <span>Periodo</span>
+          <select v-model="incomePeriod" aria-label="Periodo del reporte de ingresos">
+            <option value="7">Últimos 7 días</option>
+            <option value="30">Últimos 30 días</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="income-summary">
+        <div>
+          <span class="income-total">{{ formatCurrency(incomeReport.total) }}</span>
+          <span class="income-caption">Ganancia del periodo</span>
+        </div>
+        <div>
+          <span class="income-order-count">{{ displayStat(incomeReport.orderCount) }}</span>
+          <span class="income-caption">Pedidos pagados y entregados</span>
+        </div>
+      </div>
+
+      <div v-if="loading" class="loading-state">
+        <i class="pi pi-spin pi-spinner"></i>
+        <span>Cargando reporte de ingresos...</span>
+      </div>
+      <div v-else-if="incomeReport.orderCount === 0" class="income-empty">
+        No hay pedidos pagados y entregados en este periodo.
+      </div>
+      <div v-else class="income-chart-container">
+        <div class="income-chart" :class="{ 'income-chart-month': incomeDays.length > 7 }">
+          <div
+            v-for="day in incomeDays"
+            :key="day.key"
+            class="income-chart-column"
+            :title="`${day.label}: ${formatCurrency(day.total)} (${day.orderCount} pedidos)`"
+          >
+            <span class="income-bar-value">{{ formatCurrency(day.total) }}</span>
+            <div class="income-bar-track">
+              <div
+                class="income-bar"
+                :style="{ height: `${incomeBarHeight(day.total)}%` }"
+                role="img"
+                :aria-label="`${day.label}: ${formatCurrency(day.total)}`"
+              ></div>
+            </div>
+            <span class="income-bar-label">{{ day.label }}</span>
+          </div>
+        </div>
+      </div>
+      <p v-if="incomeReport.undatedOrderCount" class="income-note">
+        {{ incomeReport.undatedOrderCount }} pedido(s) pagado(s) y entregado(s) no tienen fecha de entrega y no se incluyen en el reporte.
+      </p>
+      <p v-if="incomeReport.missingEarningsCount" class="income-note">
+        {{ incomeReport.missingEarningsCount }} pedido(s) pagado(s) no incluyen la ganancia del restaurante y no se sumaron.
+      </p>
+    </section>
+
     <!-- Panel de inicio rápido -->
     <div class="quick-actions">
       <h2>Acciones Rápidas</h2>
@@ -144,6 +206,8 @@ const stats = ref({
   today_income: null,
 });
 const recentOrders = ref([]);
+const deliveredOrders = ref([]);
+const incomePeriod = ref('7');
 const loading = ref(false);
 const loadError = ref('');
 
@@ -172,48 +236,26 @@ async function fetchOrdersPage(params) {
   });
 }
 
-async function fetchTodayIncome() {
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
+async function fetchDeliveredOrders() {
   let page = 1;
-  let income = 0;
-  let hasMore = true;
+  const deliveredOrders = [];
+  let hasMore;
 
-  while (hasMore) {
+  do {
     const response = await fetchOrdersPage({ page, status: 'delivered' });
     const orders = getOrdersList(response);
+    deliveredOrders.push(...orders);
+    hasMore = Boolean(response.data?.next) && orders.length > 0;
+    page += 1;
+  } while (hasMore);
 
-    for (const order of orders) {
-      const createdAt = new Date(order.created_at);
-      if (Number.isNaN(createdAt.getTime())) {
-        throw new Error('No se pudo interpretar la fecha de un pedido.');
-      }
-
-      if (createdAt < startOfToday) {
-        hasMore = false;
-        break;
-      }
-      if (order.is_paid) {
-        const total = Number(order.total);
-        if (!Number.isFinite(total)) {
-          throw new Error('No se pudo interpretar el total de un pedido.');
-        }
-        income += total;
-      }
-    }
-
-    if (hasMore) {
-      hasMore = Boolean(response.data?.next) && orders.length > 0;
-      page += 1;
-    }
-  }
-
-  return income;
+  return deliveredOrders;
 }
 
 async function loadDashboardData() {
   loading.value = true;
   loadError.value = '';
+  deliveredOrders.value = [];
   stats.value = {
     total_orders: null,
     active_orders: null,
@@ -222,14 +264,14 @@ async function loadDashboardData() {
   };
 
   try {
-    const [ordersResponse, statusResponses, todayIncome] = await Promise.all([
+    const [ordersResponse, statusResponses, fetchedDeliveredOrders] = await Promise.all([
       fetchOrdersPage({ page: 1 }),
       Promise.all(
         [...new Set(['pending', ...activeOrderStatuses])].map(status =>
           fetchOrdersPage({ page: 1, page_size: 1, status })
         )
       ),
-      fetchTodayIncome(),
+      fetchDeliveredOrders(),
     ]);
 
     const countByStatus = new Map(
@@ -239,6 +281,7 @@ async function loadDashboardData() {
       ])
     );
 
+    deliveredOrders.value = fetchedDeliveredOrders;
     stats.value = {
       total_orders: getOrderCount(ordersResponse),
       active_orders: activeOrderStatuses.reduce(
@@ -246,7 +289,7 @@ async function loadDashboardData() {
         0
       ),
       pending_orders: countByStatus.get('pending'),
-      today_income: todayIncome,
+      today_income: todayIncome.value,
     };
     recentOrders.value = getOrdersList(ordersResponse).slice(0, 5);
   } catch (error) {
@@ -259,6 +302,119 @@ async function loadDashboardData() {
   } finally {
     loading.value = false;
   }
+}
+
+function getLocalDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getDeliveredDate(order) {
+  if (!order.delivered_at) return null;
+  const date = new Date(order.delivered_at);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+const incomeReport = computed(() => {
+  const days = Number(incomePeriod.value);
+  const today = new Date();
+  const startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  startDate.setDate(startDate.getDate() - days + 1);
+  const startKey = getLocalDateKey(startDate);
+  const endKey = getLocalDateKey(today);
+  let total = 0;
+  let orderCount = 0;
+  let undatedOrderCount = 0;
+  let missingEarningsCount = 0;
+
+  for (const order of deliveredOrders.value) {
+    if (!order.is_paid) continue;
+    const deliveredDate = getDeliveredDate(order);
+    if (!deliveredDate) {
+      undatedOrderCount += 1;
+      continue;
+    }
+
+    const dateKey = getLocalDateKey(deliveredDate);
+    if (dateKey < startKey || dateKey > endKey) continue;
+
+    const earnings = getRestaurantEarnings(order);
+    if (earnings === null) {
+      missingEarningsCount += 1;
+      continue;
+    }
+
+    total += earnings;
+    orderCount += 1;
+  }
+
+  return { total, orderCount, undatedOrderCount, missingEarningsCount };
+});
+
+const incomeDays = computed(() => {
+  const days = Number(incomePeriod.value);
+  const today = new Date();
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  firstDay.setDate(firstDay.getDate() - days + 1);
+
+  const buckets = Array.from({ length: days }, (_, index) => {
+    const date = new Date(firstDay);
+    date.setDate(firstDay.getDate() + index);
+    return {
+      key: getLocalDateKey(date),
+      label: new Intl.DateTimeFormat('es-MX', {
+        day: 'numeric',
+        month: days === 7 ? 'short' : undefined,
+      }).format(date),
+      total: 0,
+      orderCount: 0,
+    };
+  });
+  const bucketsByDate = new Map(buckets.map(bucket => [bucket.key, bucket]));
+
+  for (const order of deliveredOrders.value) {
+    if (!order.is_paid) continue;
+    const date = getDeliveredDate(order);
+    if (!date) continue;
+
+    const bucket = bucketsByDate.get(getLocalDateKey(date));
+    if (!bucket) continue;
+
+    const earnings = getRestaurantEarnings(order);
+    if (earnings === null) continue;
+
+    bucket.total += earnings;
+    bucket.orderCount += 1;
+  }
+
+  return buckets;
+});
+
+const todayIncome = computed(() => {
+  const todayKey = getLocalDateKey(new Date());
+  return deliveredOrders.value.reduce((total, order) => {
+    if (!order.is_paid) return total;
+    const date = getDeliveredDate(order);
+    if (!date || getLocalDateKey(date) !== todayKey) return total;
+    const earnings = getRestaurantEarnings(order);
+    return earnings === null ? total : total + earnings;
+  }, 0);
+});
+
+function getRestaurantEarnings(order) {
+  if (order.restaurant_earnings === null || order.restaurant_earnings === undefined) {
+    return null;
+  }
+  const earnings = Number(order.restaurant_earnings);
+  return Number.isFinite(earnings) ? earnings : null;
+}
+
+function incomeBarHeight(value) {
+  const maxTotal = Math.max(...incomeDays.value.map(day => day.total), 0);
+  if (maxTotal === 0 || value === 0) return 0;
+  return Math.max((value / maxTotal) * 100, 4);
 }
 
 function displayStat(value) {
@@ -290,6 +446,7 @@ function statusLabel(status) {
     confirmed: 'Confirmado',
     preparing: 'Preparando',
     ready: 'Listo',
+    assigned: 'Esperando respuesta del repartidor',
     in_delivery: 'En camino',
     delivered: 'Entregado',
     cancelled: 'Cancelado',
@@ -360,6 +517,150 @@ onMounted(loadDashboardData);
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1.5rem;
   margin-bottom: 2rem;
+}
+
+.income-report {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  overflow: hidden;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.income-report-header,
+.income-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.income-report-header h2 {
+  margin: 0;
+  color: #1a1a2e;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.income-report-header p {
+  margin: 0.4rem 0 0;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.period-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.period-filter select {
+  padding: 0.55rem 0.7rem;
+  color: #374151;
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.income-summary {
+  justify-content: flex-start;
+  gap: 3rem;
+  margin: 1.5rem 0 1rem;
+}
+
+.income-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.income-total,
+.income-order-count {
+  color: #1a1a2e;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.income-caption {
+  color: #6b7280;
+  font-size: 0.8rem;
+}
+
+.income-chart {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+  min-height: 190px;
+  padding-top: 1rem;
+}
+
+.income-chart-container {
+  overflow-x: auto;
+}
+
+.income-chart-month {
+  grid-template-columns: repeat(30, minmax(28px, 1fr));
+  min-width: 900px;
+}
+
+.income-chart-column {
+  display: flex;
+  min-width: 0;
+  height: 190px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.income-bar-value {
+  overflow: hidden;
+  width: 100%;
+  color: #6b7280;
+  font-size: 0.68rem;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.income-bar-track {
+  display: flex;
+  width: 100%;
+  height: 130px;
+  align-items: flex-end;
+  justify-content: center;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.income-bar {
+  width: min(100%, 44px);
+  min-height: 0;
+  background: linear-gradient(180deg, #34d399, #16a34a);
+  border-radius: 6px 6px 0 0;
+  transition: height 0.2s ease;
+}
+
+.income-bar-label {
+  color: #6b7280;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.income-empty {
+  padding: 2rem 0;
+  color: #6b7280;
+  text-align: center;
+}
+
+.income-note {
+  margin: 0.75rem 0 0;
+  color: #92400e;
+  font-size: 0.8rem;
 }
 
 .stat-card {
@@ -640,6 +941,28 @@ onMounted(loadDashboardData);
 }
 
 @media (max-width: 700px) {
+  .income-report-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .income-summary {
+    gap: 1.5rem;
+  }
+
+  .income-total,
+  .income-order-count {
+    font-size: 1.25rem;
+  }
+
+  .income-chart {
+    gap: 0.35rem;
+  }
+
+  .income-bar-value {
+    font-size: 0.6rem;
+  }
+
   .order-item,
   .order-main {
     align-items: flex-start;
