@@ -42,8 +42,14 @@
           </div>
 
           <!-- Imagen del producto -->
-          <div v-if="!isEditing" class="form-group full-width">
+          <div class="form-group full-width">
             <label for="image">Imagen del producto</label>
+            <img
+              v-if="imagePreviewUrl || currentImage"
+              :src="imagePreviewUrl || currentImage"
+              alt="Vista previa de la imagen del producto"
+              class="image-preview"
+            />
             <input
               id="image"
               type="file"
@@ -54,6 +60,9 @@
             />
             <small class="error-text" v-if="errors.image">{{ errors.image }}</small>
             <small v-else-if="imageFile" class="subtitle">{{ imageFile.name }}</small>
+            <small v-else-if="isEditing" class="subtitle">
+              Selecciona una imagen nueva para reemplazar la actual.
+            </small>
           </div>
 
           <!-- Precio y Descuento -->
@@ -182,7 +191,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useProductsStore } from '@/stores/products';
 import { useCategoriesStore } from '@/stores/categories';
@@ -198,6 +207,8 @@ const error = ref('');
 const errors = reactive({});
 const categories = ref([]);
 const imageFile = ref(null);
+const currentImage = ref('');
+const imagePreviewUrl = ref('');
 
 const form = reactive({
   name: '',
@@ -216,10 +227,23 @@ const form = reactive({
 
 function handleImageChange(event) {
   imageFile.value = event.target.files?.[0] || null;
+  if (imagePreviewUrl.value) {
+    URL.revokeObjectURL(imagePreviewUrl.value);
+    imagePreviewUrl.value = '';
+  }
+  if (imageFile.value) {
+    imagePreviewUrl.value = URL.createObjectURL(imageFile.value);
+  }
   delete errors.image;
 }
 
 const isEditing = computed(() => !!route.params.id);
+
+onUnmounted(() => {
+  if (imagePreviewUrl.value) {
+    URL.revokeObjectURL(imagePreviewUrl.value);
+  }
+});
 
 // Cargar categorías
 async function loadCategories() {
@@ -241,6 +265,7 @@ onMounted(async () => {
       loading.value = true;
       const product = await productsStore.fetchProduct(route.params.id);
       if (product) {
+        currentImage.value = product.image || '';
         Object.assign(form, {
           name: product.name || '',
           description: product.description || '',
@@ -318,7 +343,7 @@ async function submitForm() {
 
     let result;
     if (isEditing.value) {
-      result = await productsStore.updateProduct(route.params.id, data);
+      result = await productsStore.updateProduct(route.params.id, data, imageFile.value);
       console.log('Producto actualizado:', result);
     } else {
       result = await productsStore.createProduct(data, imageFile.value);
@@ -412,6 +437,14 @@ function goBack() {
 
 .form-input.is-invalid {
   border-color: #ef4444;
+}
+
+.image-preview {
+  width: 160px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
 }
 
 textarea.form-input {

@@ -128,12 +128,25 @@ export const useProductsStore = defineStore('products', () => {
     }
   }
 
-  async function updateProduct(id, productData) {
+  async function updateProduct(id, productData, imageFile = null) {
     loading.value = true;
     error.value = null;
     
     try {
-      const response = await api.put(`/products/products/${id}/`, productData);
+      let payload = productData;
+      let config;
+
+      if (imageFile) {
+        const formData = new FormData();
+        Object.entries(productData).forEach(([key, value]) => {
+          formData.append(key, value === null ? '' : value);
+        });
+        formData.append('image', imageFile);
+        payload = formData;
+        config = { headers: { 'Content-Type': false } };
+      }
+
+      const response = await api.put(`/products/products/${id}/`, payload, config);
       const index = products.value.findIndex(p => p.id === id);
       if (index !== -1) {
         products.value[index] = response.data;
