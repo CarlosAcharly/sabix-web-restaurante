@@ -67,19 +67,48 @@ export const useOrdersStore = defineStore('orders', () => {
         for (const key of keys) {
           const value = source[key];
           if (value !== undefined && value !== null && value !== '') {
-            return Number(value);
+            const number = Number(value);
+            if (Number.isFinite(number)) return number;
           }
         }
       }
       return NaN;
     };
 
-    const latitude = findCoordinate(['current_location_lat', 'latitude', 'latitud']);
-    const longitude = findCoordinate(['current_location_lng', 'longitude', 'longitud']);
+    const latitude = findCoordinate([
+      'current_location_lat',
+      'restaurant_lat',
+      'restaurant_latitude',
+      'latitude',
+      'latitud',
+    ]);
+    const longitude = findCoordinate([
+      'current_location_lng',
+      'restaurant_lng',
+      'restaurant_longitude',
+      'longitude',
+      'longitud',
+    ]);
 
-    return Number.isFinite(latitude) && Number.isFinite(longitude)
-      ? { restaurant_lat: latitude, restaurant_lng: longitude }
-      : {};
+    if (
+      !Number.isFinite(latitude)
+      || !Number.isFinite(longitude)
+      || latitude < -90
+      || latitude > 90
+      || longitude < -180
+      || longitude > 180
+    ) {
+      return {};
+    }
+
+    return {
+      restaurant_lat: latitude,
+      restaurant_lng: longitude,
+      current_location_lat: latitude,
+      current_location_lng: longitude,
+      latitude,
+      longitude,
+    };
   }
 
   // Transiciones válidas
@@ -340,19 +369,31 @@ export const useOrdersStore = defineStore('orders', () => {
     error.value = null;
     
     try {
+      const coordinates = getRestaurantCoordinates();
+      if (
+        coordinates.restaurant_lat === undefined
+        || coordinates.restaurant_lng === undefined
+      ) {
+        throw new Error('El restaurante no tiene una ubicación válida configurada.');
+      }
+
       const response = await api.post('/orders/delivery/find-nearest/', {
         order_id: orderId,
-        ...getRestaurantCoordinates(),
+        ...coordinates,
         radius_km: radius,
         limit: limit,
+        radius,
       });
       return response.data;
     } catch (err) {
       const responseData = err.response?.data;
-      const message = responseData && typeof responseData === 'object'
-        ? responseData.error || responseData.detail || responseData.message
+      const firstValue = responseData && typeof responseData === 'object'
+        ? responseData.error || responseData.detail || responseData.message || Object.values(responseData)[0]
         : responseData;
-      error.value = String(message || 'Error al buscar repartidores');
+      const message = Array.isArray(firstValue)
+        ? firstValue[0]
+        : firstValue || err.message || 'Error al buscar repartidores';
+      error.value = String(message);
       console.error('Error finding nearest delivery people:', err);
       throw new Error(error.value);
     } finally {
