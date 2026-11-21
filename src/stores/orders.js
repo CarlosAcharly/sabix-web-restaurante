@@ -262,6 +262,26 @@ export const useOrdersStore = defineStore('orders', () => {
       calculateStats();
       return response.data;
     } catch (err) {
+      if (err.response?.status === 409) {
+        try {
+          await fetchOrder(orderId);
+        } catch (refreshError) {
+          console.warn('No se pudo refrescar el pedido después del conflicto 409:', refreshError);
+        }
+        const responseData = err.response.data;
+        const message = typeof responseData === 'string'
+          ? responseData
+          : responseData?.detail || responseData?.message || responseData?.error
+            || 'El pedido ya tiene una asignación o solicitud de repartidor activa.';
+
+        error.value = null;
+        return {
+          conflict: true,
+          message: String(message),
+          order: currentOrder.value,
+        };
+      }
+
       const responseData = err.response?.data;
       const firstValue = responseData && typeof responseData === 'object'
         ? responseData.detail || responseData.message || responseData.error || Object.values(responseData)[0]

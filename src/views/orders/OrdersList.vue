@@ -473,7 +473,10 @@ async function retryAutoAssign(orderId) {
   retryingOrderId.value = orderId;
   try {
     const result = await ordersStore.autoAssignDelivery(orderId);
-    showToast(result.message || 'Solicitud enviada; esperando aceptación del repartidor.', 'success');
+    showToast(
+      result.message || 'Solicitud enviada; esperando aceptación del repartidor.',
+      result.conflict ? 'info' : 'success',
+    );
     await loadOrders();
   } catch (error) {
     showToast(error.message || 'No se pudo reintentar el despacho automático', 'error');
