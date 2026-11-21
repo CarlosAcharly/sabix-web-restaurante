@@ -35,6 +35,8 @@ export const useAuthStore = defineStore('auth', () => {
             phone: userData.restaurant_phone || userData.phone,
             is_verified: userData.is_restaurant_verified,
             profile_image: userData.profile_image,
+            current_location_lat: userData.current_location_lat ?? userData.latitude ?? userData.latitud ?? null,
+            current_location_lng: userData.current_location_lng ?? userData.longitude ?? userData.longitud ?? null,
           };
           localStorage.setItem('restaurant', JSON.stringify(restaurant.value));
         }
@@ -72,22 +74,26 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function checkAuth() {
-    if (!token.value) {
-      const storedToken = localStorage.getItem('token');
-      if (storedToken) {
-        token.value = storedToken;
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          try {
-            user.value = JSON.parse(storedUser);
-            const storedRestaurant = localStorage.getItem('restaurant');
-            if (storedRestaurant) {
-              restaurant.value = JSON.parse(storedRestaurant);
-            }
-          } catch (e) {
-            console.error('Error parsing user data:', e);
-          }
-        }
+    const storedToken = localStorage.getItem('token');
+    if (storedToken) {
+      token.value = storedToken;
+    }
+
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        user.value = JSON.parse(storedUser);
+      } catch (e) {
+        console.error('Error parsing user data:', e);
+      }
+    }
+
+    const storedRestaurant = localStorage.getItem('restaurant');
+    if (storedRestaurant) {
+      try {
+        restaurant.value = JSON.parse(storedRestaurant);
+      } catch (e) {
+        console.error('Error parsing restaurant data:', e);
       }
     }
     return !!token.value;
@@ -110,6 +116,8 @@ export const useAuthStore = defineStore('auth', () => {
       phone: updatedUser.restaurant_phone || updatedUser.phone || restaurant.value?.phone,
       is_verified: updatedUser.is_restaurant_verified ?? restaurant.value?.is_verified,
       profile_image: updatedUser.profile_image || restaurant.value?.profile_image,
+      current_location_lat: updatedUser.current_location_lat ?? updatedUser.latitude ?? updatedUser.latitud ?? profileData.current_location_lat ?? restaurant.value?.current_location_lat,
+      current_location_lng: updatedUser.current_location_lng ?? updatedUser.longitude ?? updatedUser.longitud ?? profileData.current_location_lng ?? restaurant.value?.current_location_lng,
     };
     localStorage.setItem('restaurant', JSON.stringify(restaurant.value));
 

@@ -49,6 +49,35 @@
             <span>Teléfono de contacto</span>
             <input id="restaurant-phone" v-model.trim="profile.phone" type="tel" autocomplete="tel" />
           </label>
+
+          <label class="field" for="restaurant-latitude">
+            <span>Latitud</span>
+            <input
+              id="restaurant-latitude"
+              v-model.trim="profile.latitude"
+              type="number"
+              step="any"
+              min="-90"
+              max="90"
+            />
+          </label>
+
+          <label class="field" for="restaurant-longitude">
+            <span>Longitud</span>
+            <input
+              id="restaurant-longitude"
+              v-model.trim="profile.longitude"
+              type="number"
+              step="any"
+              min="-180"
+              max="180"
+            />
+          </label>
+
+          <button class="secondary-button location-button" type="button" @click="useCurrentLocation">
+            <i class="pi pi-map-marker"></i>
+            Usar ubicación actual
+          </button>
         </div>
 
         <div v-if="profileSuccess" class="form-alert success-alert" role="status">
@@ -139,6 +168,8 @@ const profile = reactive({
   restaurant_description: '',
   restaurant_address: '',
   phone: '',
+  latitude: '',
+  longitude: '',
 });
 const password = reactive({
   currentPassword: '',
@@ -160,6 +191,32 @@ function populateProfile(userData) {
   profile.restaurant_description = restaurant.restaurant_description || restaurant.description || '';
   profile.restaurant_address = restaurant.restaurant_address || restaurant.address || '';
   profile.phone = restaurant.restaurant_phone || restaurant.phone || '';
+  profile.latitude = restaurant.current_location_lat ?? restaurant.latitude ?? restaurant.latitud ?? '';
+  profile.longitude = restaurant.current_location_lng ?? restaurant.longitude ?? restaurant.longitud ?? '';
+}
+
+function useCurrentLocation() {
+  profileError.value = '';
+  profileSuccess.value = '';
+
+  if (!navigator.geolocation) {
+    profileError.value = 'Este dispositivo no permite obtener la ubicación.';
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      profile.latitude = position.coords.latitude.toFixed(7);
+      profile.longitude = position.coords.longitude.toFixed(7);
+      profileSuccess.value = 'Ubicación obtenida. Guarda los cambios para enviarla al servidor.';
+    },
+    (error) => {
+      profileError.value = error.code === 1
+        ? 'Debes permitir el acceso a la ubicación.'
+        : 'No se pudo obtener la ubicación actual.';
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 },
+  );
 }
 
 function getErrorMessage(error, fallback) {
@@ -200,6 +257,8 @@ async function saveProfile() {
       restaurant_description: profile.restaurant_description,
       restaurant_address: profile.restaurant_address,
       phone: profile.phone,
+      current_location_lat: profile.latitude === '' ? null : Number(profile.latitude),
+      current_location_lng: profile.longitude === '' ? null : Number(profile.longitude),
     });
     profileSuccess.value = 'Los datos del restaurante se guardaron correctamente.';
   } catch (error) {
@@ -460,6 +519,13 @@ onMounted(() => {
 .secondary-button:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+
+.location-button {
+  align-self: end;
+  min-height: 44px;
+  width: 100%;
+  margin-bottom: 2px;
 }
 
 .form-alert {
